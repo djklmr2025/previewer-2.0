@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Previewer 2.0</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <div class="left">
+      <button id="btn-open-json" class="btn">Abrir JSON</button>
+      <button id="btn-clear" class="btn">Limpiar vista</button>
+      <button id="btn-open-bg" class="btn">Abrir fondo</button>
+    </div>
+
+    <div class="center">
+      <button id="btn-lock" class="btn btn-toggle" aria-pressed="false">Fijar: OFF</button>
+      <button id="btn-rotate-left" class="btn">Rotar -15°</button>
+      <button id="btn-rotate-right" class="btn">Rotar +15°</button>
+      <button id="btn-flip-h" class="btn">Voltear H</button>
+      <button id="btn-flip-v" class="btn">Voltear V</button>
+    </div>
+
+    <div class="right">
+      <button id="btn-zoom-out" class="btn">-10%</button>
+      <button id="btn-zoom-reset" class="btn">100%</button>
+      <button id="btn-zoom-in" class="btn">+10%</button>
+      <span id="zoom-label">100%</span>
+    </div>
+  </header>
+
+  <main class="stage-wrap">
+    <div id="stage" class="preview-stage">
+      <img id="bg-image" alt="fondo" hidden />
+      <svg id="scene" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet">
+        <defs id="defs"></defs>
+        <g id="world"></g>
+      </svg>
+    </div>
+  </main>
+
+  <input id="input-json" type="file" accept="application/json,.json" hidden />
+  <input id="input-bg" type="file" accept="image/*" hidden />
+
+  <footer class="statusbar">
+    <span id="status">Listo.</span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
