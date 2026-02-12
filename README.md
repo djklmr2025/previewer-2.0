@@ -15,6 +15,17 @@ Visor independiente para proyectos JSON del Flow Diagram Builder.
 - Voltear horizontal/vertical
 - Zoom `10%` a `500%`
 - Limpiar vista
+- Panel lateral plegable de catálogo
+- Listado de `library` (vectores) y `projects` (proyectos)
+- Mini previsualización de cada item
+- Búsqueda/filtro por nombre o id
+- Subida de nuevo JSON (`vector` o `proyecto`) a Blob vía API:
+  - `POST /api/publish` (vector)
+  - `POST /api/publish-project` (proyecto)
+- Visor multimedia/3D integrado:
+  - Imagen: `gif`, `webp`, `png`, `jpg`, `jpeg`
+  - Video: `mp4`, `webm`
+  - 3D: `glb`, `gltf`, `obj` (+ `mtl` opcional)
 
 ## Uso local rápido
 

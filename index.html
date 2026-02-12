@@ -9,7 +9,10 @@
 <body>
   <header class="toolbar">
     <div class="left">
+      <button id="btn-library-toggle" class="btn">Catálogo JSON</button>
+      <button id="btn-media-toggle" class="btn">Catálogo Media/3D</button>
       <button id="btn-open-json" class="btn">Abrir JSON</button>
+      <button id="btn-open-media" class="btn">Abrir Media/3D</button>
       <button id="btn-clear" class="btn">Limpiar vista</button>
       <button id="btn-open-bg" class="btn">Abrir fondo</button>
     </div>
@@ -30,18 +33,91 @@
     </div>
   </header>
 
-  <main class="stage-wrap">
-    <div id="stage" class="preview-stage">
-      <img id="bg-image" alt="fondo" hidden />
-      <svg id="scene" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet">
-        <defs id="defs"></defs>
-        <g id="world"></g>
-      </svg>
-    </div>
+  <main id="workspace" class="workspace">
+    <aside id="library-panel" class="library-panel">
+      <div class="panel-head">
+        <strong>Catálogo de Piezas</strong>
+        <button id="btn-library-hide" class="btn btn-small">Ocultar</button>
+      </div>
+
+      <div class="panel-controls">
+        <input id="library-search" type="text" placeholder="Buscar por id o nombre..." />
+        <div class="panel-row">
+          <select id="library-scope">
+            <option value="all">Todo (vectores + proyectos)</option>
+            <option value="library">Solo vectores</option>
+            <option value="projects">Solo proyectos</option>
+          </select>
+          <button id="btn-library-refresh" class="btn btn-small">Actualizar</button>
+        </div>
+      </div>
+
+      <div class="upload-block">
+        <div class="upload-title">Subir nuevo JSON</div>
+        <div class="panel-row">
+          <select id="upload-kind">
+            <option value="vector">Vector</option>
+            <option value="project">Proyecto</option>
+          </select>
+          <button id="btn-upload-json" class="btn btn-small">Subir JSON...</button>
+        </div>
+        <input id="upload-folder" type="text" placeholder="Carpeta opcional (ej: metro/linea-1)" />
+        <input id="upload-key" type="password" placeholder="PUBLISH_KEY (opcional)" />
+      </div>
+
+      <div id="library-list" class="library-list"></div>
+    </aside>
+
+    <section class="stage-wrap">
+      <div id="stage" class="preview-stage">
+        <img id="bg-image" alt="fondo" hidden />
+        <svg id="scene" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet">
+          <defs id="defs"></defs>
+          <g id="world"></g>
+        </svg>
+
+        <div id="media-overlay" class="media-overlay" hidden>
+          <div class="media-header">
+            <div id="media-title">Media Viewer</div>
+            <button id="btn-media-close" class="btn btn-small">Cerrar</button>
+          </div>
+          <div class="media-body">
+            <img id="media-image" alt="media image" hidden />
+            <video id="media-video" controls playsinline hidden></video>
+            <model-viewer id="media-model-viewer" camera-controls ar auto-rotate hidden></model-viewer>
+            <canvas id="media-3d-canvas" hidden></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside id="media-panel" class="media-panel">
+      <div class="panel-head">
+        <strong>Media / 3D</strong>
+        <button id="btn-media-hide" class="btn btn-small">Ocultar</button>
+      </div>
+
+      <div class="panel-controls">
+        <div class="panel-row">
+          <button id="btn-media-refresh" class="btn btn-small">Refrescar</button>
+          <button id="btn-media-clear-list" class="btn btn-small">Limpiar lista</button>
+        </div>
+        <input id="media-search" type="text" placeholder="Buscar archivo..." />
+      </div>
+
+      <div class="upload-block">
+        <div class="upload-title">Formatos soportados</div>
+        <div class="hint-list">glb, gltf, obj+mtl, mp4, webm, gif, webp</div>
+      </div>
+
+      <div id="media-list" class="library-list"></div>
+    </aside>
   </main>
 
   <input id="input-json" type="file" accept="application/json,.json" hidden />
   <input id="input-bg" type="file" accept="image/*" hidden />
+  <input id="input-upload-json" type="file" accept="application/json,.json" hidden />
+  <input id="input-media" type="file" accept=".glb,.gltf,.obj,.mtl,video/mp4,video/webm,image/gif,image/webp,image/png,image/jpeg" multiple hidden />
 
   <footer class="statusbar">
     <span id="status">Listo.</span>
