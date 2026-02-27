@@ -919,6 +919,16 @@
     });
   }
 
+  function isPreviewableMedia(item) {
+    if (!item || !item.kind) return false;
+    return (
+      item.kind === 'image' ||
+      item.kind === 'video' ||
+      item.kind === 'model-gltf' ||
+      item.kind === 'model-obj'
+    );
+  }
+
   function hideAllMediaWidgets() {
     els.mediaImage.hidden = true;
     els.mediaVideo.hidden = true;
@@ -1130,6 +1140,11 @@
 
   async function openMediaItem(item) {
     if (!item) return;
+    if (!isPreviewableMedia(item)) {
+      closeMediaOverlay();
+      setStatus(`Formato no previsualizable: ${item.name || 'archivo'}`);
+      return;
+    }
 
     closeMediaOverlay();
     hideAllMediaWidgets();
@@ -1231,11 +1246,7 @@
 
     renderMediaList();
     setMediaVisible(true);
-    setStatus(`Media cargada: ${state.mediaItems.length} item(s).`);
-
-    if (state.mediaItems.length > 0) {
-      void openMediaItem(state.mediaItems[0]);
-    }
+    setStatus(`Media cargada: ${state.mediaItems.length} item(s). Pulsa "Ver" para abrir un preview.`);
   }
 
   async function loadFromQuery() {
@@ -1292,7 +1303,22 @@
       scheduleMediaRender();
     });
 
-    els.btnMediaClose.addEventListener('click', () => {
+    els.btnMediaClose.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMediaOverlay();
+      setStatus('Overlay multimedia cerrado.');
+    });
+
+    els.mediaOverlay.addEventListener('click', (e) => {
+      if (e.target !== els.mediaOverlay) return;
+      closeMediaOverlay();
+      setStatus('Overlay multimedia cerrado.');
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (els.mediaOverlay.hidden) return;
       closeMediaOverlay();
       setStatus('Overlay multimedia cerrado.');
     });
@@ -1445,6 +1471,7 @@
 
   async function boot() {
     bindEvents();
+    closeMediaOverlay();
     updateWorldTransform();
     renderMediaList();
     setStatus('Previewer 2.0 listo.');
