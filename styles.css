@@ -321,6 +321,10 @@ body {
   z-index: 4;
 }
 
+.media-overlay[hidden] {
+  display: none !important;
+}
+
 .media-header {
   display: flex;
   justify-content: space-between;
