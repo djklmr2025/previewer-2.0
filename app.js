@@ -205,6 +205,21 @@
     return { x, y, w, h };
   }
 
+  function getPointXY(point) {
+    if (Array.isArray(point) && point.length >= 2) {
+      const x = Number(point[0]);
+      const y = Number(point[1]);
+      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+      return null;
+    }
+    if (point && typeof point === 'object') {
+      const x = Number(point.x ?? point[0]);
+      const y = Number(point.y ?? point[1]);
+      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+    }
+    return null;
+  }
+
   function walkElements(elements, visitor) {
     const stack = Array.isArray(elements) ? elements.slice() : [];
     while (stack.length) {
@@ -323,7 +338,11 @@
       });
     } else if (elem.type === 'polygon' || elem.type === 'path') {
       const pts = Array.isArray(elem.points) ? elem.points : [];
-      const points = pts.map((p) => `${Number(p.x ?? 0)},${Number(p.y ?? 0)}`).join(' ');
+      const points = pts
+        .map((p) => getPointXY(p))
+        .filter(Boolean)
+        .map((p) => `${p.x},${p.y}`)
+        .join(' ');
       if (points) {
         node = svgEl('polygon', {
           points,
@@ -416,13 +435,15 @@
       let maxX = Number.NEGATIVE_INFINITY;
       let maxY = Number.NEGATIVE_INFINITY;
       pts.forEach((p) => {
-        const x = Number(p.x ?? 0);
-        const y = Number(p.y ?? 0);
+        const point = getPointXY(p);
+        if (!point) return;
+        const { x, y } = point;
         if (x < minX) minX = x;
         if (y < minY) minY = y;
         if (x > maxX) maxX = x;
         if (y > maxY) maxY = y;
       });
+      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
       return { minX, minY, maxX, maxY };
     }
 
@@ -484,7 +505,11 @@
 
     if (elem.type === 'polygon' || elem.type === 'path') {
       const pts = Array.isArray(elem.points) ? elem.points : [];
-      const points = pts.map((p) => `${Number(p.x ?? 0)},${Number(p.y ?? 0)}`).join(' ');
+      const points = pts
+        .map((p) => getPointXY(p))
+        .filter(Boolean)
+        .map((p) => `${p.x},${p.y}`)
+        .join(' ');
       if (!points) return '';
       return `<polygon points="${escapeAttr(points)}" fill="${escapeAttr(fill)}" stroke="${escapeAttr(stroke)}" stroke-width="${lineWidth}"/>`;
     }
