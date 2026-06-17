@@ -235,6 +235,24 @@
     return { x, y, w, h };
   }
 
+  function getPointXY(p) {
+    if (!p) return null;
+    let x = 0;
+    let y = 0;
+    if (typeof p.x === 'number') x = p.x;
+    else if (typeof p.x === 'string') x = parseFloat(p.x) || 0;
+    else if (typeof p[0] === 'number') x = p[0];
+    else if (typeof p[0] === 'string') x = parseFloat(p[0]) || 0;
+
+    if (typeof p.y === 'number') y = p.y;
+    else if (typeof p.y === 'string') y = parseFloat(p.y) || 0;
+    else if (typeof p[1] === 'number') y = p[1];
+    else if (typeof p[1] === 'string') y = parseFloat(p[1]) || 0;
+
+    return { x, y };
+  }
+
+
   function walkElements(elements, visitor) {
     const stack = Array.isArray(elements) ? elements.slice() : [];
     while (stack.length) {
