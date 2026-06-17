@@ -299,22 +299,38 @@
     const lineWidth = Number(elem.lineWidth ?? elem.strokeWidth ?? 2);
 
     let node = null;
+    const isMover = elem.type === 'mover';
+    const isFollower = elem.followRoute === true && elem.routeId;
 
     if (elem.type === 'line') {
-      const x1 = Number(elem.x ?? elem.x1 ?? 0);
-      const y1 = Number(elem.y ?? elem.y1 ?? 0);
-      const x2 = Number(elem.endX ?? elem.x2 ?? 0);
-      const y2 = Number(elem.endY ?? elem.y2 ?? 0);
-      node = svgEl('line', {
-        x1,
-        y1,
-        x2,
-        y2,
-        stroke,
-        'stroke-width': lineWidth,
-        'stroke-linecap': 'round',
-        'stroke-dasharray': elem.active ? '8 8' : null
-      });
+      const curve = getRouteCurve(elem);
+      if (curve !== 'line') {
+        const pts = getRoutePoints(elem);
+        const pointsAttr = pts.map((p) => `${p.x},${p.y}`).join(' ');
+        node = svgEl('polyline', {
+          points: pointsAttr,
+          fill: 'none',
+          stroke,
+          'stroke-width': lineWidth,
+          'stroke-linecap': 'round',
+          'stroke-dasharray': elem.active ? '8 8' : null
+        });
+      } else {
+        const x1 = Number(elem.x ?? elem.x1 ?? 0);
+        const y1 = Number(elem.y ?? elem.y1 ?? 0);
+        const x2 = Number(elem.endX ?? elem.x2 ?? 0);
+        const y2 = Number(elem.endY ?? elem.y2 ?? 0);
+        node = svgEl('line', {
+          x1,
+          y1,
+          x2,
+          y2,
+          stroke,
+          'stroke-width': lineWidth,
+          'stroke-linecap': 'round',
+          'stroke-dasharray': elem.active ? '8 8' : null
+        });
+      }
 
       if (elem.active) {
         state.animation.lineNodes.push({
@@ -372,16 +388,20 @@
           preserveAspectRatio: 'none'
         });
       }
-    } else if (elem.type === 'mover') {
+    } else if (isMover) {
       const { x, y, w, h } = getRectLike(elem);
       const moverW = Math.max(8, Number(w) || 44);
       const moverH = Math.max(8, Number(h) || 28);
       const fillSafe = elem.fillColor || '#93c5fd';
       const strokeSafe = elem.strokeColor || '#0b1027';
       const g = svgEl('g');
+      
+      const rx = -moverW / 2;
+      const ry = -moverH / 2;
+      
       const r = svgEl('rect', {
-        x,
-        y,
+        x: rx,
+        y: ry,
         width: moverW,
         height: moverH,
         rx: Math.max(3, Math.min(moverW, moverH) * 0.25),
@@ -390,8 +410,8 @@
         'stroke-width': Math.max(1, lineWidth * 0.75)
       });
       const eye = svgEl('rect', {
-        x: x + moverW * 0.22,
-        y: y + moverH * 0.3,
+        x: rx + moverW * 0.22,
+        y: ry + moverH * 0.3,
         width: moverW * 0.56,
         height: moverH * 0.4,
         rx: Math.max(2, moverH * 0.12),
@@ -401,21 +421,11 @@
       g.appendChild(r);
       g.appendChild(eye);
       node = g;
-
-      state.animation.moverNodes.push({
-        node,
-        elem,
-        baseX: x,
-        baseY: y,
-        width: moverW,
-        height: moverH,
-        progress: Number(elem.animOffset || 0)
-      });
     }
 
     if (!node) return;
 
-    if (Number.isFinite(elem.rotation) && elem.rotation !== 0) {
+    if (Number.isFinite(elem.rotation) && elem.rotation !== 0 && !isMover) {
       const { x, y, w, h } = getRectLike(elem);
       const cx = x + w / 2;
       const cy = y + h / 2;
@@ -423,7 +433,34 @@
     }
 
     node.classList.add('sticker');
-    parent.appendChild(node);
+
+    if (isMover || isFollower) {
+      const center = getElementCenterPoint(elem);
+      if (isMover) {
+        state.animation.moverNodes.push({
+          node,
+          elem,
+          isMover: true,
+          cx: center.x,
+          cy: center.y
+        });
+        parent.appendChild(node);
+      } else {
+        const wrapper = svgEl('g');
+        wrapper.appendChild(node);
+        state.animation.moverNodes.push({
+          wrapper,
+          node,
+          elem,
+          isMover: false,
+          cx: center.x,
+          cy: center.y
+        });
+        parent.appendChild(wrapper);
+      }
+    } else {
+      parent.appendChild(node);
+    }
   }
 
   function renderProject() {
@@ -590,50 +627,341 @@
     return out;
   }
 
+  function getRouteCurve(elem) {
+    if (!elem || typeof elem !== 'object') return 'line';
+    if (elem.routeCircular === true) return 'circle';
+    return normalizeRouteCurveValue(elem.routeCurve);
+  }
+
+  function normalizeRouteCurveValue(raw) {
+    const v = String(raw || 'line').toLowerCase();
+    if (v === 'circle' || v === 'semi' || v === 'quarter' || v === 'custom') return v;
+    return 'line';
+  }
+
+  function getRouteArcDegrees(elem) {
+    const raw = Number(elem && elem.routeArcDegrees);
+    if (!Number.isFinite(raw)) return 120;
+    return Math.max(5, Math.min(355, raw));
+  }
+
+  function buildArcPointsFromChord(x1, y1, x2, y2, fraction, side) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const chord = Math.sqrt(dx * dx + dy * dy);
+    if (!(chord > 0)) return [{ x: x1, y: y1 }, { x: x2, y: y2 }];
+
+    const theta = Math.max(0.0001, Math.min((Math.PI * 2) - 0.0001, (Math.PI * 2) * fraction));
+    const r = chord / (2 * Math.sin(theta / 2));
+    const half = chord / 2;
+    const h = Math.sqrt(Math.max(0, (r * r) - (half * half)));
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const nxL = -dy / chord;
+    const nyL = dx / chord;
+    const sign = String(side || 'left') === 'right' ? -1 : 1;
+    const cx = mx + (nxL * h * sign);
+    const cy = my + (nyL * h * sign);
+
+    const a0 = Math.atan2(y1 - cy, x1 - cx);
+    const candA = a0 + theta;
+    const candB = a0 - theta;
+    const exA = cx + r * Math.cos(candA);
+    const eyA = cy + r * Math.sin(candA);
+    const exB = cx + r * Math.cos(candB);
+    const eyB = cy + r * Math.sin(candB);
+    const dA = Math.sqrt(Math.pow(exA - x2, 2) + Math.pow(eyA - y2, 2));
+    const dB = Math.sqrt(Math.pow(exB - x2, 2) + Math.pow(eyB - y2, 2));
+    const dir = dA <= dB ? 1 : -1;
+
+    const steps = Math.max(8, Math.round(72 * fraction));
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const a = a0 + (dir * theta * t);
+      pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+    }
+    return pts;
+  }
+
   function getRoutePoints(elem) {
     if (!elem || typeof elem !== 'object') return [];
     if (elem.type === 'line') {
-      return [
-        { x: Number(elem.x ?? elem.x1 ?? 0), y: Number(elem.y ?? elem.y1 ?? 0) },
-        { x: Number(elem.endX ?? elem.x2 ?? 0), y: Number(elem.endY ?? elem.y2 ?? 0) }
-      ];
+      if (!Number.isFinite(elem.x) || !Number.isFinite(elem.y) || !Number.isFinite(elem.endX) || !Number.isFinite(elem.endY)) return [];
+      const curve = getRouteCurve(elem);
+      if (curve === 'circle') {
+        const cx = (elem.x + elem.endX) / 2;
+        const cy = (elem.y + elem.endY) / 2;
+        const radius = Math.max(2, Math.sqrt(Math.pow(elem.endX - elem.x, 2) + Math.pow(elem.endY - elem.y, 2)) / 2);
+        const segments = 72;
+        const pts = [];
+        for (let i = 0; i <= segments; i++) {
+          const a = (Math.PI * 2 * i) / segments;
+          pts.push({ x: cx + radius * Math.cos(a), y: cy + radius * Math.sin(a) });
+        }
+        return pts;
+      }
+      if (curve === 'semi') {
+        return buildArcPointsFromChord(
+          elem.x, elem.y, elem.endX, elem.endY, 0.5, elem.routeArcSide || 'left'
+        );
+      }
+      if (curve === 'quarter') {
+        return buildArcPointsFromChord(
+          elem.x, elem.y, elem.endX, elem.endY, 0.25, elem.routeArcSide || 'left'
+        );
+      }
+      if (curve === 'custom') {
+        const deg = getRouteArcDegrees(elem);
+        return buildArcPointsFromChord(
+          elem.x, elem.y, elem.endX, elem.endY, deg / 360, elem.routeArcSide || 'left'
+        );
+      }
+      return [{ x: elem.x, y: elem.y }, { x: elem.endX, y: elem.endY }];
     }
     if ((elem.type === 'path' || elem.type === 'polygon') && Array.isArray(elem.points)) {
-      return elem.points
-        .map((p) => ({ x: Number(p?.x ?? 0), y: Number(p?.y ?? 0) }))
-        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+      const pts = elem.points
+        .map((p) => getPointXY(p))
+        .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+      if (!pts.length) return [];
+      if (elem.type === 'polygon' && elem.closed) {
+        pts.push({ x: pts[0].x, y: pts[0].y });
+      }
+      return pts;
     }
     return [];
   }
 
-  function pointAtPolyline(points, t01) {
-    if (!Array.isArray(points) || points.length < 2) return null;
-    const t = ((Number(t01) || 0) % 1 + 1) % 1;
-    const segLens = [];
+  function getPolylineLength(points) {
+    if (!Array.isArray(points) || points.length < 2) return 0;
     let total = 0;
-    for (let i = 1; i < points.length; i += 1) {
+    for (let i = 1; i < points.length; i++) {
       const dx = points[i].x - points[i - 1].x;
       const dy = points[i].y - points[i - 1].y;
-      const len = Math.hypot(dx, dy);
-      segLens.push(len);
-      total += len;
+      total += Math.sqrt(dx * dx + dy * dy);
     }
-    if (total <= 0) return { x: points[0].x, y: points[0].y };
-    let d = t * total;
-    for (let i = 1; i < points.length; i += 1) {
-      const len = segLens[i - 1];
-      if (d <= len || i === points.length - 1) {
-        const p0 = points[i - 1];
-        const p1 = points[i];
-        const u = len > 0 ? d / len : 0;
+    return total;
+  }
+
+  function getPointOnPolyline(points, t) {
+    if (!Array.isArray(points) || points.length === 0) return null;
+    if (points.length === 1) return { x: points[0].x, y: points[0].y, angle: 0 };
+    const clamped = Math.max(0, Math.min(1, Number(t) || 0));
+    const total = getPolylineLength(points);
+    if (total <= 0) return { x: points[0].x, y: points[0].y, angle: 0 };
+    const target = clamped * total;
+    let acc = 0;
+    for (let i = 1; i < points.length; i++) {
+      const p0 = points[i - 1];
+      const p1 = points[i];
+      const dx = p1.x - p0.x;
+      const dy = p1.y - p0.y;
+      const seg = Math.sqrt(dx * dx + dy * dy);
+      if (seg <= 0) continue;
+      if (acc + seg >= target || i === points.length - 1) {
+        const local = Math.max(0, Math.min(1, (target - acc) / seg));
         return {
-          x: p0.x + (p1.x - p0.x) * u,
-          y: p0.y + (p1.y - p0.y) * u
+          x: p0.x + dx * local,
+          y: p0.y + dy * local,
+          angle: Math.atan2(dy, dx)
         };
       }
-      d -= len;
+      acc += seg;
     }
-    return { x: points[points.length - 1].x, y: points[points.length - 1].y };
+    const last = points[points.length - 1];
+    const prev = points[points.length - 2];
+    return { x: last.x, y: last.y, angle: Math.atan2(last.y - prev.y, last.x - prev.x) };
+  }
+
+  function getElementCenterPoint(elem) {
+    if (!elem || typeof elem !== 'object') return { x: 0, y: 0 };
+    if (elem.type === 'line') {
+      return {
+        x: ((Number(elem.x ?? elem.x1 ?? 0) + Number(elem.endX ?? elem.x2 ?? 0)) / 2),
+        y: ((Number(elem.y ?? elem.y1 ?? 0) + Number(elem.endY ?? elem.y2 ?? 0)) / 2)
+      };
+    }
+    if ((elem.type === 'path' || elem.type === 'polygon') && Array.isArray(elem.points) && elem.points.length > 0) {
+      let sumX = 0, sumY = 0, count = 0;
+      elem.points.forEach((p) => {
+        const pt = getPointXY(p);
+        if (pt) {
+          sumX += pt.x;
+          sumY += pt.y;
+          count++;
+        }
+      });
+      if (count > 0) return { x: sumX / count, y: sumY / count };
+    }
+    const { x, y, w, h } = getRectLike(elem);
+    return { x: x + w / 2, y: y + h / 2 };
+  }
+
+  function isRouteElement(elem) {
+    if (!elem) return false;
+    return (elem.type === 'line' || elem.type === 'path' || elem.type === 'polygon') &&
+           Boolean(elem.isRoute || elem.useAsRoute || elem.routeCircular);
+  }
+
+  function findConnectedRoute(routeElem, atEnd, flatElements) {
+    if (!routeElem) return null;
+    const pts = getRoutePoints(routeElem);
+    if (pts.length < 2) return null;
+    const pt = atEnd ? pts[pts.length - 1] : pts[0];
+
+    let best = null;
+    let bestDist = 8;
+    let bestDir = 'right';
+    let bestProgress = 0;
+
+    flatElements.forEach((other) => {
+      if (!other || other.id === routeElem.id) return;
+      if (!isRouteElement(other)) return;
+      const opts = getRoutePoints(other);
+      if (opts.length < 2) return;
+
+      const dStart = Math.hypot(pt.x - opts[0].x, pt.y - opts[0].y);
+      if (dStart < bestDist) {
+        bestDist = dStart;
+        best = other;
+        bestDir = 'right';
+        bestProgress = 0;
+      }
+      const dEnd = Math.hypot(pt.x - opts[opts.length - 1].x, pt.y - opts[opts.length - 1].y);
+      if (dEnd < bestDist) {
+        bestDist = dEnd;
+        best = other;
+        bestDir = 'left';
+        bestProgress = 1;
+      }
+    });
+
+    if (best) {
+      return { route: best, direction: bestDir, progress: bestProgress };
+    }
+    return null;
+  }
+
+  function resolveElementRouteState(elem, dt, flatElements, byId) {
+    if (!elem || typeof elem !== 'object') return { x: 0, y: 0, angle: 0, routeFound: false };
+
+    const isMover = elem.type === 'mover';
+    const defaultCenter = getElementCenterPoint(elem);
+    const enabled = isMover ? true : Boolean(elem.followRoute);
+    const autoConnect = Boolean(elem.autoConnectRoute || elem.autoConnect);
+    if (!enabled) {
+      return { x: defaultCenter.x, y: defaultCenter.y, angle: 0, routeFound: false };
+    }
+
+    let routeId = String(elem.routeId || elem.routePathId || elem.followPathId || '');
+    if (!routeId) return { x: defaultCenter.x, y: defaultCenter.y, angle: 0, routeFound: false };
+
+    let route = byId.get(routeId);
+    if (!route) return { x: defaultCenter.x, y: defaultCenter.y, angle: 0, routeFound: false };
+
+    let points = getRoutePoints(route);
+    if (points.length <= 1) return { x: defaultCenter.x, y: defaultCenter.y, angle: 0, routeFound: false };
+
+    const progressKey = isMover ? 'progress' : 'routeProgress';
+    const rawProgress = Number(elem[progressKey]);
+    let progress = Number.isFinite(rawProgress) ? rawProgress : 0;
+
+    const dirRaw = isMover ? elem.flowDirection : (elem.routeDirection || elem.flowDirection);
+    let dir = String(dirRaw || 'right') === 'left' ? -1 : 1;
+    const routeMode = String(elem.routeMode || 'loop');
+
+    if (elem.active !== false) {
+      const rawSpeed = Number(isMover ? elem.speed : (elem.routeSpeed || elem.speed));
+      const speed = Number.isFinite(rawSpeed) ? Math.max(1, Math.min(300, rawSpeed)) : 40;
+
+      let remainingDist = dir * 2.5 * speed * dt;
+      let guard = 0;
+
+      while (Math.abs(remainingDist) > 1e-6 && guard < 16) {
+        guard += 1;
+        const routeLen = Math.max(1e-6, getPolylineLength(points));
+        const along = progress * routeLen;
+        const nextAlong = along + remainingDist;
+
+        if (nextAlong >= 0 && nextAlong <= routeLen) {
+          progress = nextAlong / routeLen;
+          remainingDist = 0;
+          break;
+        }
+
+        if (nextAlong > routeLen) {
+          const overflow = nextAlong - routeLen;
+          if (autoConnect) {
+            const next = findConnectedRoute(route, true, flatElements);
+            if (next && next.route) {
+              route = next.route;
+              points = getRoutePoints(route);
+              elem.routeId = String(route.id);
+              dir = String(next.direction || 'right') === 'left' ? -1 : 1;
+              if (isMover) elem.flowDirection = dir < 0 ? 'left' : 'right';
+              else elem.routeDirection = dir < 0 ? 'left' : 'right';
+              progress = Math.max(0, Math.min(1, Number(next.progress) || 0));
+              remainingDist = Math.abs(overflow) * (dir < 0 ? -1 : 1);
+              continue;
+            }
+          }
+
+          if (routeMode === 'stop') {
+            progress = 1;
+            elem.active = false;
+          } else {
+            progress = (nextAlong % routeLen) / routeLen;
+          }
+          remainingDist = 0;
+          break;
+        }
+
+        // nextAlong < 0
+        const overflow = -nextAlong;
+        if (autoConnect) {
+          const next = findConnectedRoute(route, false, flatElements);
+          if (next && next.route) {
+            route = next.route;
+            points = getRoutePoints(route);
+            elem.routeId = String(route.id);
+            dir = String(next.direction || 'right') === 'left' ? -1 : 1;
+            if (isMover) elem.flowDirection = dir < 0 ? 'left' : 'right';
+            else elem.routeDirection = dir < 0 ? 'left' : 'right';
+            progress = Math.max(0, Math.min(1, Number(next.progress) || 0));
+            remainingDist = Math.abs(overflow) * (dir < 0 ? -1 : 1);
+            continue;
+          }
+        }
+
+        if (routeMode === 'stop') {
+          progress = 0;
+          elem.active = false;
+        } else {
+          const routeLen = Math.max(1e-6, getPolylineLength(points));
+          const wrapped = ((nextAlong % routeLen) + routeLen) % routeLen;
+          progress = wrapped / routeLen;
+        }
+        remainingDist = 0;
+        break;
+      }
+    }
+
+    if (routeMode === 'stop') {
+      if (progress <= 0) {
+        progress = 0;
+        elem.active = false;
+      } else if (progress >= 1) {
+        progress = 1;
+        elem.active = false;
+      }
+    } else {
+      progress = ((progress % 1) + 1) % 1;
+    }
+    elem[progressKey] = progress;
+
+    const p = getPointOnPolyline(points, progress);
+    if (!p) return { x: defaultCenter.x, y: defaultCenter.y, angle: 0, routeFound: false };
+    return { x: p.x, y: p.y, angle: p.angle, routeFound: true };
   }
 
   function startSceneAnimation() {
@@ -641,12 +969,19 @@
     const flat = flattenElements(state.project.elements || []);
     const byId = new Map(flat.map((e) => [String(e.id || ''), e]));
 
-    // Resolver ruta de cada mover una sola vez por render.
+    // Pre-calcular e inicializar posición en primer frame
     state.animation.moverNodes.forEach((m) => {
-      const routeId = String(m?.elem?.routePathId || m?.elem?.followPathId || m?.elem?.routeId || '');
-      const routeElem = routeId ? byId.get(routeId) : null;
-      m.routePoints = getRoutePoints(routeElem);
-      m.routeSpeed = Math.max(0.03, Number(m?.elem?.speed || m?.elem?.velocity || 1) * 0.12);
+      const statePos = resolveElementRouteState(m.elem, 0, flat, byId);
+      if (statePos.routeFound) {
+        const angleDeg = (statePos.angle * 180) / Math.PI;
+        if (m.isMover) {
+          m.node.setAttribute('transform', `translate(${statePos.x} ${statePos.y}) rotate(${angleDeg})`);
+        } else {
+          const dx = statePos.x - m.cx;
+          const dy = statePos.y - m.cy;
+          m.wrapper.setAttribute('transform', `translate(${dx} ${dy}) rotate(${angleDeg} ${m.cx} ${m.cy})`);
+        }
+      }
     });
 
     const tick = (ts) => {
@@ -660,13 +995,17 @@
       });
 
       state.animation.moverNodes.forEach((m) => {
-        if (!m.routePoints || m.routePoints.length < 2) return;
-        m.progress = ((m.progress || 0) + dt * m.routeSpeed) % 1;
-        const p = pointAtPolyline(m.routePoints, m.progress);
-        if (!p) return;
-        const dx = p.x - (m.baseX + m.width / 2);
-        const dy = p.y - (m.baseY + m.height / 2);
-        m.node.setAttribute('transform', `translate(${dx} ${dy})`);
+        const statePos = resolveElementRouteState(m.elem, dt, flat, byId);
+        if (statePos.routeFound) {
+          const angleDeg = (statePos.angle * 180) / Math.PI;
+          if (m.isMover) {
+            m.node.setAttribute('transform', `translate(${statePos.x} ${statePos.y}) rotate(${angleDeg})`);
+          } else {
+            const dx = statePos.x - m.cx;
+            const dy = statePos.y - m.cy;
+            m.wrapper.setAttribute('transform', `translate(${dx} ${dy}) rotate(${angleDeg} ${m.cx} ${m.cy})`);
+          }
+        }
       });
 
       state.animation.rafId = requestAnimationFrame(tick);
