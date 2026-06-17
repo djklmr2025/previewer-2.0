@@ -840,13 +840,30 @@
       const dStart = Math.sqrt(Math.pow(opts[0].x - pt.x, 2) + Math.pow(opts[0].y - pt.y, 2));
       const dEnd = Math.sqrt(Math.pow(opts[opts.length - 1].x - pt.x, 2) + Math.pow(opts[opts.length - 1].y - pt.y, 2));
       const d = Math.min(dStart, dEnd);
-      if (d > threshold || d >= bestDist) return;
+      if (d > threshold) return;
 
-      bestDist = d;
-      if (dStart <= dEnd) {
-        best = { route: candidate, progress: 0.0001, direction: 'right' };
-      } else {
-        best = { route: candidate, progress: 0.9999, direction: 'left' };
+      // Priorizar conexión con rutas del mismo color (mismo ramal/línea)
+      const currentColorMatch = best && routeElem.strokeColor && best.route.strokeColor &&
+        (String(routeElem.strokeColor).toLowerCase() === String(best.route.strokeColor).toLowerCase());
+      const candidateColorMatch = routeElem.strokeColor && candidate.strokeColor &&
+        (String(routeElem.strokeColor).toLowerCase() === String(candidate.strokeColor).toLowerCase());
+
+      let isBetter = false;
+      if (!best) {
+        isBetter = true;
+      } else if (candidateColorMatch && !currentColorMatch) {
+        isBetter = true;
+      } else if (candidateColorMatch === currentColorMatch) {
+        isBetter = (d < bestDist);
+      }
+
+      if (isBetter) {
+        bestDist = d;
+        if (dStart <= dEnd) {
+          best = { route: candidate, progress: 0.0001, direction: 'right' };
+        } else {
+          best = { route: candidate, progress: 0.9999, direction: 'left' };
+        }
       }
     });
     return best;
@@ -1027,11 +1044,13 @@
     return Math.max(0, Math.min(1, bestAlong / totalLen));
   }
 
-  function applyPortalTeleport(elem, statePos, flatElements) {
+  function applyPortalTeleport(elem, statePos, flatElements, dt) {
     if (!elem || !statePos || !statePos.routeFound) return statePos;
-    const cd = Number(elem._portalCooldownFrames);
+    const cd = Number(elem._portalCooldownSeconds);
     if (Number.isFinite(cd) && cd > 0) {
-      elem._portalCooldownFrames = cd - 1;
+      if (dt > 0) {
+        elem._portalCooldownSeconds = Math.max(0, cd - dt);
+      }
       return statePos;
     }
 
@@ -1052,7 +1071,7 @@
         elem.routeProgress = t;
       }
     }
-    elem._portalCooldownFrames = 24;
+    elem._portalCooldownSeconds = 0.5;
     return { x: cOut.x, y: cOut.y, angle: statePos.angle || 0, routeFound: true };
   }
 
@@ -1177,7 +1196,7 @@
     const p = getPointOnPolyline(points, progress);
     if (!p) return { x: defaultCenter.x, y: defaultCenter.y, angle: 0, routeFound: false };
     const rawState = { x: p.x, y: p.y, angle: p.angle, routeFound: true };
-    return applyPortalTeleport(elem, rawState, flatElements);
+    return applyPortalTeleport(elem, rawState, flatElements, dt);
   }
 
   function startSceneAnimation() {
