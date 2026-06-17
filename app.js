@@ -827,38 +827,235 @@
     if (pts.length < 2) return null;
     const pt = atEnd ? pts[pts.length - 1] : pts[0];
 
+    const threshold = 28;
     let best = null;
-    let bestDist = 8;
-    let bestDir = 'right';
-    let bestProgress = 0;
+    let bestDist = Infinity;
 
-    flatElements.forEach((other) => {
-      if (!other || other.id === routeElem.id) return;
-      if (!isRouteElement(other)) return;
-      const opts = getRoutePoints(other);
+    flatElements.forEach((candidate) => {
+      if (!isRouteElement(candidate)) return;
+      if (!candidate || String(candidate.id) === String(routeElem.id)) return;
+      const opts = getRoutePoints(candidate);
       if (opts.length < 2) return;
 
-      const dStart = Math.hypot(pt.x - opts[0].x, pt.y - opts[0].y);
-      if (dStart < bestDist) {
-        bestDist = dStart;
-        best = other;
-        bestDir = 'right';
-        bestProgress = 0;
-      }
-      const dEnd = Math.hypot(pt.x - opts[opts.length - 1].x, pt.y - opts[opts.length - 1].y);
-      if (dEnd < bestDist) {
-        bestDist = dEnd;
-        best = other;
-        bestDir = 'left';
-        bestProgress = 1;
+      const dStart = Math.sqrt(Math.pow(opts[0].x - pt.x, 2) + Math.pow(opts[0].y - pt.y, 2));
+      const dEnd = Math.sqrt(Math.pow(opts[opts.length - 1].x - pt.x, 2) + Math.pow(opts[opts.length - 1].y - pt.y, 2));
+      const d = Math.min(dStart, dEnd);
+      if (d > threshold || d >= bestDist) return;
+
+      bestDist = d;
+      if (dStart <= dEnd) {
+        best = { route: candidate, progress: 0.0001, direction: 'right' };
+      } else {
+        best = { route: candidate, progress: 0.9999, direction: 'left' };
       }
     });
-
-    if (best) {
-      return { route: best, direction: bestDir, progress: bestProgress };
-    }
-    return null;
+    return best;
   }
+
+  function getPortalCenter(portal) {
+    if (!portal || portal.type !== 'portal') return null;
+    const x = Number(portal.x);
+    const y = Number(portal.y);
+    const w = Number(portal.width);
+    const h = Number(portal.height);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) return null;
+    return { x: x + (w / 2), y: y + (h / 2), r: Math.max(8, Math.min(Math.abs(w), Math.abs(h)) / 2) };
+  }
+
+  function findPortalAtPoint(x, y, kind, flatElements) {
+    const tKind = String(kind || '');
+    let found = null;
+    let bestDist = Infinity;
+    flatElements.forEach((elem) => {
+      if (!elem || elem.type !== 'portal') return;
+      if (String(elem.portalKind || '') !== tKind) return;
+      const c = getPortalCenter(elem);
+      if (!c) return;
+      const d = Math.sqrt(Math.pow(x - c.x, 2) + Math.pow(y - c.y, 2));
+      if (d <= c.r + 8 && d < bestDist) {
+        bestDist = d;
+        found = elem;
+      }
+    });
+    return found;
+  }
+
+  function normalizePortalKey(rawKey) {
+    const raw = String(rawKey || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!raw) return '';
+    return raw.replace(/[^A-Z0-9]/g, '');
+  }
+
+  function parsePortalKey(rawKey) {
+    const key = normalizePortalKey(rawKey);
+    if (!key) return null;
+    const match = /^([A-Z])([0-9]+)?$/.exec(key);
+    if (!match) return { key, letter: '', index: null, counterpart: '', family: key };
+    const letter = String(match[1] || '');
+    const index = Number.isFinite(Number(match[2])) ? Number(match[2]) : null;
+    let counterpart = letter;
+    let family = letter;
+    if (letter === 'A' || letter === 'B') {
+      counterpart = letter === 'A' ? 'B' : 'A';
+      family = 'AB';
+    } else if (letter === 'C' || letter === 'D') {
+      counterpart = letter === 'C' ? 'D' : 'C';
+      family = 'CD';
+    }
+    return { key, letter, index, counterpart, family };
+  }
+
+  function scorePortalMatch(importInfo, exportPortal) {
+    const expInfo = parsePortalKey(exportPortal && exportPortal.portalKey);
+    if (!importInfo || !expInfo) return -1;
+    if (expInfo.key === importInfo.key) return 1000;
+    if (importInfo.index != null && expInfo.index != null && expInfo.index !== importInfo.index) return -1;
+
+    let score = 0;
+    if (importInfo.family && expInfo.family === importInfo.family) score += 100;
+    if (expInfo.letter && expInfo.letter === importInfo.counterpart) score += 150;
+    if (importInfo.index != null && expInfo.index === importInfo.index) score += 80;
+    if (!score && importInfo.letter && expInfo.letter === importInfo.letter) score += 30;
+    return score;
+  }
+
+  function findMatchingExportPortal(importPortal, flatElements) {
+    if (!importPortal || importPortal.type !== 'portal') return null;
+    const importInfo = parsePortalKey(importPortal.portalKey);
+    if (!importInfo || !importInfo.key) return null;
+
+    const importCenter = getPortalCenter(importPortal);
+    let out = null;
+    let bestScore = -1;
+    let bestDist = Infinity;
+    flatElements.forEach((elem) => {
+      if (!elem || elem.type !== 'portal') return;
+      if (String(elem.portalKind || '') !== 'export') return;
+      const score = scorePortalMatch(importInfo, elem);
+      if (score < 0) return;
+      const c = getPortalCenter(elem);
+      const d = (c && importCenter) ? Math.sqrt(Math.pow(c.x - importCenter.x, 2) + Math.pow(c.y - importCenter.y, 2)) : Infinity;
+      if (score > bestScore || (score === bestScore && d < bestDist)) {
+        bestScore = score;
+        bestDist = d;
+        out = elem;
+      }
+    });
+    return out;
+  }
+
+  function distanceToLineSegment(px, py, x1, y1, x2, y2) {
+    const A = px - x1;
+    const B = py - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+    if (lenSq !== 0) param = dot / lenSq;
+    let xx, yy;
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+    const dx = px - xx;
+    const dy = py - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function findNearestRouteForPoint(x, y, flatElements) {
+    let best = null;
+    let bestDist = Infinity;
+    flatElements.forEach((elem) => {
+      if (!isRouteElement(elem)) return;
+      const pts = getRoutePoints(elem);
+      if (pts.length < 2) return;
+      for (let i = 1; i < pts.length; i++) {
+        const d = distanceToLineSegment(x, y, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+        if (d < bestDist) {
+          bestDist = d;
+          best = elem;
+        }
+      }
+    });
+    return best;
+  }
+
+  function projectPointToRouteProgress(routeElem, x, y) {
+    const pts = getRoutePoints(routeElem);
+    if (!pts || pts.length < 2) return 0;
+    let totalLen = 0;
+    const segLens = [];
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i].x - pts[i - 1].x;
+      const dy = pts[i].y - pts[i - 1].y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      segLens.push(len);
+      totalLen += len;
+    }
+    if (totalLen <= 0) return 0;
+
+    let bestDist = Infinity;
+    let bestAlong = 0;
+    let acc = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const p0 = pts[i - 1];
+      const p1 = pts[i];
+      const vx = p1.x - p0.x;
+      const vy = p1.y - p0.y;
+      const lenSq = vx * vx + vy * vy;
+      if (lenSq <= 0) {
+        acc += segLens[i - 1];
+        continue;
+      }
+      const t = Math.max(0, Math.min(1, (((x - p0.x) * vx) + ((y - p0.y) * vy)) / lenSq));
+      const px = p0.x + vx * t;
+      const py = p0.y + vy * t;
+      const d = Math.sqrt(Math.pow(x - px, 2) + Math.pow(y - py, 2));
+      if (d < bestDist) {
+        bestDist = d;
+        bestAlong = acc + (segLens[i - 1] * t);
+      }
+      acc += segLens[i - 1];
+    }
+    return Math.max(0, Math.min(1, bestAlong / totalLen));
+  }
+
+  function applyPortalTeleport(elem, statePos, flatElements) {
+    if (!elem || !statePos || !statePos.routeFound) return statePos;
+    const cd = Number(elem._portalCooldownFrames);
+    if (Number.isFinite(cd) && cd > 0) {
+      elem._portalCooldownFrames = cd - 1;
+      return statePos;
+    }
+
+    const pIn = findPortalAtPoint(statePos.x, statePos.y, 'import', flatElements);
+    if (!pIn) return statePos;
+    const pOut = findMatchingExportPortal(pIn, flatElements);
+    if (!pOut) return statePos;
+    const cOut = getPortalCenter(pOut);
+    if (!cOut) return statePos;
+
+    const nearest = findNearestRouteForPoint(cOut.x, cOut.y, flatElements);
+    if (nearest) {
+      elem.routeId = String(nearest.id);
+      const t = projectPointToRouteProgress(nearest, cOut.x, cOut.y);
+      if (elem.type === 'mover') {
+        elem.progress = t;
+      } else {
+        elem.routeProgress = t;
+      }
+    }
+    elem._portalCooldownFrames = 24;
+    return { x: cOut.x, y: cOut.y, angle: statePos.angle || 0, routeFound: true };
+  }
+
 
   function resolveElementRouteState(elem, dt, flatElements, byId) {
     if (!elem || typeof elem !== 'object') return { x: 0, y: 0, angle: 0, routeFound: false };
@@ -979,7 +1176,8 @@
 
     const p = getPointOnPolyline(points, progress);
     if (!p) return { x: defaultCenter.x, y: defaultCenter.y, angle: 0, routeFound: false };
-    return { x: p.x, y: p.y, angle: p.angle, routeFound: true };
+    const rawState = { x: p.x, y: p.y, angle: p.angle, routeFound: true };
+    return applyPortalTeleport(elem, rawState, flatElements);
   }
 
   function startSceneAnimation() {
