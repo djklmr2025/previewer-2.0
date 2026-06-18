@@ -474,30 +474,6 @@
         const newJSON = getHashable(newElem);
 
         if (oldJSON !== newJSON) {
-          if (animSet.has(id)) {
-            let debugDiv = document.getElementById('anim-debug');
-            if (!debugDiv) {
-              debugDiv = document.createElement('div');
-              debugDiv.id = 'anim-debug';
-              debugDiv.style.position = 'fixed';
-              debugDiv.style.top = '10px';
-              debugDiv.style.left = '10px';
-              debugDiv.style.background = 'red';
-              debugDiv.style.color = 'white';
-              debugDiv.style.zIndex = '9999';
-              debugDiv.style.padding = '10px';
-              document.body.appendChild(debugDiv);
-            }
-            debugDiv.innerText = "JUMP ON " + id + "\nOLD: " + oldJSON.substring(0,100) + "\nNEW: " + newJSON.substring(0,100);
-            
-            // Encuentra la primera diferencia manual
-            for (let i = 0; i < oldJSON.length; i++) {
-              if (oldJSON[i] !== newJSON[i]) {
-                 debugDiv.innerText += "\nDIFF AT " + i + ": '" + oldJSON.substring(Math.max(0, i-10), i+20) + "' vs '" + newJSON.substring(Math.max(0, i-10), i+20) + "'";
-                 break;
-              }
-            }
-          }
           // Elemento modificado → re-renderizar
           const oldNode = els.world.querySelector(`[data-id="${id}"]`);
           if (oldNode) {
