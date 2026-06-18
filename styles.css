@@ -94,6 +94,13 @@ body {
   display: flex;
 }
 
+/* Ocultar interfaz en modo Builder Live */
+body.builder-live .toolbar,
+body.builder-live .library-panel,
+body.builder-live .property-panel {
+  display: none !important;
+}
+
 .library-panel {
   width: 0;
   opacity: 0;

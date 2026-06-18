@@ -1318,7 +1318,8 @@
 
     if (elem.active !== false) {
       const rawSpeed = Number(isMover ? elem.speed : (elem.routeSpeed || elem.speed));
-      const speed = Number.isFinite(rawSpeed) ? Math.max(1, Math.min(300, rawSpeed)) : 40;
+      // TEMPORARY FIX: Divide speed by 4 to match Editor speed
+      const speed = (Number.isFinite(rawSpeed) ? Math.max(1, Math.min(300, rawSpeed)) : 40) / 4;
 
       let remainingDist = dir * 2.5 * speed * dt;
       let guard = 0;
@@ -2567,6 +2568,8 @@
     const params = new URLSearchParams(window.location.search);
     const builderLive = params.get('builderLive') === '1' || params.get('builder_live') === '1';
     if (!builderLive) return;
+
+    document.body.classList.add('builder-live');
 
     const session = params.get('liveSession') || '';
     const storageKey = session ? `flow-builder-live-${session}` : '';
