@@ -448,6 +448,8 @@
           if (animSet.has(String(clone.id || ''))) {
             delete clone.progress;
             delete clone.routeProgress;
+            delete clone.routeId;
+            delete clone.routeDirection;
             delete clone._portalCooldownSeconds;
             delete clone.x;
             delete clone.y;
@@ -487,7 +489,27 @@
             const newNode = tempParent.firstChild;
 
             if (newNode) {
-              oldNode.parentNode.replaceChild(newNode, oldNode);
+              // Aplicar transform inmediatamente para evitar un parpadeo en (0,0) durante 1 frame
+              const mObj = state.animation.moverNodes.find(x => x.node === newNode || x.wrapper === newNode);
+              if (mObj) {
+                const flat = state.animation.flatElements || [];
+                const byId = state.animation.elementsById || new Map();
+                const statePos = resolveElementRouteState(mObj.elem, 0, flat, byId);
+                if (statePos.routeFound) {
+                  const angleDeg = (statePos.angle * 180) / Math.PI;
+                  if (mObj.isMover) {
+                    mObj.node.setAttribute('transform', `translate(${statePos.x} ${statePos.y}) rotate(${angleDeg})`);
+                  } else {
+                    const dx = statePos.x - mObj.cx;
+                    const dy = statePos.y - mObj.cy;
+                    mObj.wrapper.setAttribute('transform', `translate(${dx} ${dy}) rotate(${angleDeg} ${mObj.cx} ${mObj.cy})`);
+                  }
+                }
+              }
+
+              if (oldNode.parentNode) {
+                oldNode.parentNode.replaceChild(newNode, oldNode);
+              }
             }
 
             // Si es un grupo, marcar sus hijos como ya procesados (ya renderizados dentro)
