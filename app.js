@@ -730,6 +730,8 @@
     node.classList.add('sticker');
 
     if (isMover || isFollower) {
+      // OVERRIDE CSS TRANSITIONS! tick() runs at 60fps and conflicts with CSS transform transition, causing severe jittering.
+      node.style.transition = 'none';
       const center = getElementCenterPoint(elem);
       if (isMover) {
         state.animation.moverNodes.push({
