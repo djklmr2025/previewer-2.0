@@ -415,6 +415,19 @@
     // IMPORTANTE: flattenElements incluye grupos Y sus hijos.
     // Cuando se renderiza un grupo, renderElement ya renderiza sus hijos recursivamente.
     // Usamos skipSet para no procesar hijos que ya fueron renderizados por su padre.
+    // Helper: identificar descendientes animados para ignorar sus cambios geométricos
+    const animSet = new Set();
+    const markAnim = (elems, isAnim) => {
+      elems.forEach((e) => {
+        const anim = isAnim || e.followRoute === true || e.type === 'mover';
+        if (anim && e.id) animSet.add(String(e.id));
+        if (e.type === 'group' && Array.isArray(e.elements)) {
+          markAnim(e.elements, anim);
+        }
+      });
+    };
+    markAnim(resolved.elements, false);
+
     for (const newElem of newFlat) {
       const id = String(newElem.id || '');
       if (!id || skipSet.has(id)) continue;
@@ -429,7 +442,7 @@
           if (clone.type === 'group') {
             delete clone.elements; // Evita re-renderizar todo el grupo si un hijo cambia
           }
-          if (clone.type === 'mover' || clone.followRoute) {
+          if (animSet.has(String(clone.id || ''))) {
             delete clone.progress;
             delete clone.routeProgress;
             delete clone._portalCooldownSeconds;
@@ -437,7 +450,19 @@
             delete clone.y;
             delete clone.angle;
             delete clone.flowDirection;
-            delete clone.points; // Ignorar mutaciones de offsetElement en seguidores
+            delete clone.points;
+            delete clone.width;
+            delete clone.height;
+            delete clone.cx;
+            delete clone.cy;
+            delete clone.endX;
+            delete clone.endY;
+            delete clone.x1;
+            delete clone.y1;
+            delete clone.x2;
+            delete clone.y2;
+            delete clone.rx;
+            delete clone.ry;
           }
           return JSON.stringify(clone);
         };
@@ -1471,7 +1496,8 @@
       });
 
       state.animation.moverNodes.forEach((m) => {
-        const statePos = resolveElementRouteState(m.elem, dt, currentFlat, currentById);
+        const currentElem = currentById.get(String(m.elem.id || '')) || m.elem;
+        const statePos = resolveElementRouteState(currentElem, dt, currentFlat, currentById);
         if (statePos.routeFound) {
           const angleDeg = (statePos.angle * 180) / Math.PI;
           if (m.isMover) {
