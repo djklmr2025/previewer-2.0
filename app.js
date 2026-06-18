@@ -1361,8 +1361,7 @@
 
     if (elem.active !== false) {
       const rawSpeed = Number(isMover ? elem.speed : (elem.routeSpeed || elem.speed));
-      // TEMPORARY FIX: Divide speed by 4 to match Editor speed
-      const speed = (Number.isFinite(rawSpeed) ? Math.max(1, Math.min(300, rawSpeed)) : 40) / 4;
+      const speed = Number.isFinite(rawSpeed) ? Math.max(1, Math.min(300, rawSpeed)) : 40;
 
       let remainingDist = dir * 2.5 * speed * dt;
       let guard = 0;
