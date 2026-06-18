@@ -424,8 +424,26 @@
 
       if (oldElem) {
         // Elemento existente — verificar si cambió
-        const oldJSON = JSON.stringify(oldElem);
-        const newJSON = JSON.stringify(newElem);
+        const getHashable = (el) => {
+          const clone = { ...el };
+          if (clone.type === 'group') {
+            delete clone.elements; // Evita re-renderizar todo el grupo si un hijo cambia
+          }
+          if (clone.type === 'mover' || clone.followRoute) {
+            delete clone.progress;
+            delete clone.routeProgress;
+            delete clone._portalCooldownSeconds;
+            delete clone.x;
+            delete clone.y;
+            delete clone.angle;
+            delete clone.flowDirection;
+            delete clone.points; // Ignorar mutaciones de offsetElement en seguidores
+          }
+          return JSON.stringify(clone);
+        };
+
+        const oldJSON = getHashable(oldElem);
+        const newJSON = getHashable(newElem);
 
         if (oldJSON !== newJSON) {
           // Elemento modificado → re-renderizar
