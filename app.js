@@ -1,44 +1,4 @@
 (() => {
-  // DEBUG CONSOLE OVERLAY
-  const debugDiv = document.createElement('div');
-  debugDiv.style.position = 'fixed';
-  debugDiv.style.bottom = '10px';
-  debugDiv.style.left = '10px';
-  debugDiv.style.width = '500px';
-  debugDiv.style.maxHeight = '400px';
-  debugDiv.style.overflowY = 'auto';
-  debugDiv.style.background = 'rgba(0,0,0,0.9)';
-  debugDiv.style.color = '#00ff00';
-  debugDiv.style.fontFamily = 'monospace';
-  debugDiv.style.fontSize = '11px';
-  debugDiv.style.zIndex = '99999';
-  debugDiv.style.padding = '10px';
-  debugDiv.style.border = '2px solid #00ff00';
-  debugDiv.style.pointerEvents = 'none';
-  document.body.appendChild(debugDiv);
-
-  function logToScreen(type, ...args) {
-    const p = document.createElement('div');
-    p.textContent = `[${type}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`;
-    if (type === 'ERROR') p.style.color = '#ff3333';
-    if (type === 'WARN') p.style.color = '#ffff33';
-    debugDiv.appendChild(p);
-    debugDiv.scrollTop = debugDiv.scrollHeight;
-  }
-
-  const origLog = console.log;
-  const origWarn = console.warn;
-  const origError = console.error;
-  console.log = (...args) => { origLog(...args); logToScreen('LOG', ...args); };
-  console.warn = (...args) => { origWarn(...args); logToScreen('WARN', ...args); };
-  console.error = (...args) => { origError(...args); logToScreen('ERROR', ...args); };
-  window.addEventListener('error', (e) => {
-    logToScreen('ERROR', e.message, 'at', e.filename, ':', e.lineno);
-  });
-  window.addEventListener('unhandledrejection', (e) => {
-    logToScreen('ERROR', 'Unhandled promise rejection:', e.reason);
-  });
-
   const els = {
     workspace: document.getElementById('workspace'),
     stage: document.getElementById('stage'),
@@ -353,11 +313,6 @@
   }
 
   function applyLiveDelta(project) {
-    console.log(
-      "LIVE UPDATE",
-      performance.now()
-    );
-
     const resolved = resolveProjectPayload(project);
     if (!resolved) return;
 
