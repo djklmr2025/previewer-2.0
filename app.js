@@ -1099,8 +1099,11 @@
 
   function isRouteElement(elem) {
     if (!elem) return false;
-    return (elem.type === 'line' || elem.type === 'path' || elem.type === 'polygon') &&
-           Boolean(elem.isRoute || elem.useAsRoute || elem.routeCircular);
+    const t = String(elem.type || '');
+    if (!(t === 'line' || t === 'path' || t === 'polygon')) return false;
+    if (elem.routeRole === true || elem.isRoute || elem.useAsRoute || elem.routeCircular) return true;
+    const n = String(elem.name || '').toLowerCase();
+    return n.includes('ruta') || n.includes('via');
   }
 
   function findConnectedRoute(routeElem, atEnd, flatElements) {
