@@ -1,4 +1,44 @@
 (() => {
+  // DEBUG CONSOLE OVERLAY
+  const debugDiv = document.createElement('div');
+  debugDiv.style.position = 'fixed';
+  debugDiv.style.bottom = '10px';
+  debugDiv.style.left = '10px';
+  debugDiv.style.width = '500px';
+  debugDiv.style.maxHeight = '400px';
+  debugDiv.style.overflowY = 'auto';
+  debugDiv.style.background = 'rgba(0,0,0,0.9)';
+  debugDiv.style.color = '#00ff00';
+  debugDiv.style.fontFamily = 'monospace';
+  debugDiv.style.fontSize = '11px';
+  debugDiv.style.zIndex = '99999';
+  debugDiv.style.padding = '10px';
+  debugDiv.style.border = '2px solid #00ff00';
+  debugDiv.style.pointerEvents = 'none';
+  document.body.appendChild(debugDiv);
+
+  function logToScreen(type, ...args) {
+    const p = document.createElement('div');
+    p.textContent = `[${type}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`;
+    if (type === 'ERROR') p.style.color = '#ff3333';
+    if (type === 'WARN') p.style.color = '#ffff33';
+    debugDiv.appendChild(p);
+    debugDiv.scrollTop = debugDiv.scrollHeight;
+  }
+
+  const origLog = console.log;
+  const origWarn = console.warn;
+  const origError = console.error;
+  console.log = (...args) => { origLog(...args); logToScreen('LOG', ...args); };
+  console.warn = (...args) => { origWarn(...args); logToScreen('WARN', ...args); };
+  console.error = (...args) => { origError(...args); logToScreen('ERROR', ...args); };
+  window.addEventListener('error', (e) => {
+    logToScreen('ERROR', e.message, 'at', e.filename, ':', e.lineno);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    logToScreen('ERROR', 'Unhandled promise rejection:', e.reason);
+  });
+
   const els = {
     workspace: document.getElementById('workspace'),
     stage: document.getElementById('stage'),
@@ -92,7 +132,9 @@
       rafId: 0,
       lastTs: 0,
       lineNodes: [],
-      moverNodes: []
+      moverNodes: [],
+      flatElements: [],
+      elementsById: new Map()
     },
 
     // Deck/Lamina runtime
@@ -300,11 +342,223 @@
     return resolved;
   }
 
+  function getElementDescendantIds(elem) {
+    const ids = [];
+    walkElements([elem], (el) => {
+      if (el && el.id && el.id !== elem.id) {
+        ids.push(String(el.id));
+      }
+    });
+    return ids;
+  }
+
+  function applyLiveDelta(project) {
+    console.log(
+      "LIVE UPDATE",
+      performance.now()
+    );
+
+    const resolved = resolveProjectPayload(project);
+    if (!resolved) return;
+
+    // 1. Actualizar cámara si es necesario
+    const cam = resolved.camera || {};
+    if (Number.isFinite(cam.zoom) && (cam.zoom !== state.project.camera?.zoom || cam.x !== state.project.camera?.x || cam.y !== state.project.camera?.y)) {
+      state.zoom = clamp(Number(cam.zoom), 0.1, 5);
+      state.project.camera = { ...cam };
+      updateWorldTransform();
+    }
+
+    // 2. Obtener listas aplanadas
+    const oldFlat = flattenElements(state.project.elements || []);
+    const newFlat = flattenElements(resolved.elements || []);
+
+    const oldMap = new Map(oldFlat.map((e) => [String(e.id || ''), e]));
+    const newMap = new Map(newFlat.map((e) => [String(e.id || ''), e]));
+
+    // 3. Preservar progreso local de vehículos animados en la nueva jerarquía
+    for (const newElem of newFlat) {
+      const id = String(newElem.id || '');
+      if (id && (newElem.type === 'mover' || (newElem.followRoute === true && newElem.routeId))) {
+        const oldElem = oldMap.get(id);
+        if (oldElem) {
+          if (newElem.progress === undefined || Number.isFinite(oldElem.progress)) {
+            newElem.progress = oldElem.progress;
+          }
+          if (newElem.routeProgress === undefined || Number.isFinite(oldElem.routeProgress)) {
+            newElem.routeProgress = oldElem.routeProgress;
+          }
+          newElem._portalCooldownSeconds = oldElem._portalCooldownSeconds;
+        }
+      }
+    }
+
+    // 4. Procesar eliminaciones
+    for (const oldElem of oldFlat) {
+      const id = String(oldElem.id || '');
+      if (!id) continue;
+      if (!newMap.has(id)) {
+        // Elemento eliminado!
+        const node = els.world.querySelector(`[data-id="${id}"]`);
+        if (node) node.remove();
+
+        // Limpiar de animación (incluyendo posibles descendientes si era un grupo)
+        const affectedIds = [id, ...getElementDescendantIds(oldElem)];
+        if (node) {
+          state.animation.lineNodes = state.animation.lineNodes.filter((ln) => ln.node !== node && !node.contains(ln.node));
+        }
+        state.animation.moverNodes = state.animation.moverNodes.filter((m) => !affectedIds.includes(m.elem.id));
+      }
+    }
+
+    // Mapeo de padres en el nuevo proyecto
+    const parentMap = new Map();
+    const walkParent = (elements, parentId = null) => {
+      elements.forEach((el) => {
+        if (parentId) parentMap.set(String(el.id || ''), String(parentId));
+        if (el.type === 'group' && Array.isArray(el.elements)) {
+          walkParent(el.elements, el.id);
+        }
+      });
+    };
+    walkParent(resolved.elements);
+
+    // Helper: marcar todos los descendientes de un elemento como ya procesados
+    const skipSet = new Set();
+    const markDescendantsSkipped = (elem) => {
+      if (elem.type === 'group' && Array.isArray(elem.elements)) {
+        walkElements(elem.elements, (child) => {
+          if (child.id) skipSet.add(String(child.id));
+        });
+      }
+    };
+
+    // Helper: insertar nuevo nodo en els.world en el orden correcto
+    const insertRootNode = (newNode, newElem) => {
+      const siblings = resolved.elements;
+      const index = siblings.indexOf(newElem);
+      let nextDOMNode = null;
+      if (index !== -1) {
+        for (let i = index + 1; i < siblings.length; i++) {
+          const sibId = String(siblings[i].id || '');
+          if (!sibId) continue;
+          const sibNode = els.world.querySelector(`[data-id="${sibId}"]`);
+          if (sibNode && sibNode.parentNode === els.world) {
+            nextDOMNode = sibNode;
+            break;
+          }
+        }
+      }
+      if (nextDOMNode) {
+        els.world.insertBefore(newNode, nextDOMNode);
+      } else {
+        els.world.appendChild(newNode);
+      }
+    };
+
+    // 5. Procesar modificaciones y adiciones
+    // IMPORTANTE: flattenElements incluye grupos Y sus hijos.
+    // Cuando se renderiza un grupo, renderElement ya renderiza sus hijos recursivamente.
+    // Usamos skipSet para no procesar hijos que ya fueron renderizados por su padre.
+    for (const newElem of newFlat) {
+      const id = String(newElem.id || '');
+      if (!id || skipSet.has(id)) continue;
+
+      const parentId = parentMap.get(id);
+      const oldElem = oldMap.get(id);
+
+      if (oldElem) {
+        // Elemento existente — verificar si cambió
+        const oldJSON = JSON.stringify(oldElem);
+        const newJSON = JSON.stringify(newElem);
+
+        if (oldJSON !== newJSON) {
+          // Elemento modificado → re-renderizar
+          const oldNode = els.world.querySelector(`[data-id="${id}"]`);
+          if (oldNode) {
+            // Limpiar de animación
+            const affectedIds = [id, ...getElementDescendantIds(oldElem)];
+            state.animation.lineNodes = state.animation.lineNodes.filter((ln) => ln.node !== oldNode && !oldNode.contains(ln.node));
+            state.animation.moverNodes = state.animation.moverNodes.filter((m) => !affectedIds.includes(String(m.elem.id || '')));
+
+            const tempParent = svgEl('g');
+            renderElement(newElem, tempParent);
+            const newNode = tempParent.firstChild;
+
+            if (newNode) {
+              oldNode.parentNode.replaceChild(newNode, oldNode);
+            }
+
+            // Si es un grupo, marcar sus hijos como ya procesados (ya renderizados dentro)
+            markDescendantsSkipped(newElem);
+          }
+        }
+      } else {
+        // Elemento nuevo
+        if (parentId) {
+          // Es hijo de un grupo.
+          const parentOld = oldMap.get(parentId);
+
+          if (!parentOld) {
+            // Padre también es nuevo → el padre renderizará todos sus hijos al ser procesado
+            continue;
+          }
+
+          // ¿El padre cambió?
+          const parentNew = newMap.get(parentId);
+          const parentChanged = JSON.stringify(parentOld) !== JSON.stringify(parentNew);
+          if (parentChanged) {
+            // El padre será/fue re-renderizado incluyendo este nuevo hijo → skipear
+            continue;
+          }
+
+          // Padre sin cambios pero este hijo es nuevo → insertar en el nodo del padre existente
+          const parentNode = els.world.querySelector(`[data-id="${parentId}"]`);
+          if (parentNode) {
+            const tempParent = svgEl('g');
+            renderElement(newElem, tempParent);
+            const newNode = tempParent.firstChild;
+            if (newNode) {
+              parentNode.appendChild(newNode);
+            }
+            markDescendantsSkipped(newElem);
+          }
+        } else {
+          // Elemento raíz nuevo → insertar en els.world
+          const tempParent = svgEl('g');
+          renderElement(newElem, tempParent);
+          const newNode = tempParent.firstChild;
+          if (newNode) {
+            insertRootNode(newNode, newElem);
+          }
+          // Marcar hijos como ya procesados (renderizados dentro del grupo)
+          markDescendantsSkipped(newElem);
+        }
+      }
+    }
+
+    // 6. Actualizar el estado del proyecto y caché
+    state.project = resolved;
+    updateAnimationCache();
+
+    // 7. Sincronizar deck si cambió
+    const oldCPs = JSON.stringify(state.deck.controlPoints || []);
+    buildDeckControlPoints(resolved.elements);
+    const newCPs = JSON.stringify(state.deck.controlPoints || []);
+    if (oldCPs !== newCPs) {
+      renderDeckPanel();
+    }
+
+    // 8. Arrancar animación si aún no está corriendo
+    startSceneAnimation();
+  }
+
   function renderElement(elem, parent) {
     if (!elem || typeof elem !== 'object') return;
 
     if (elem.type === 'group' && Array.isArray(elem.elements)) {
       const g = svgEl('g', { class: 'sticker' });
+      if (elem.id) g.setAttribute('data-id', elem.id);
       parent.appendChild(g);
       elem.elements.forEach((child) => renderElement(child, g));
       return;
@@ -462,9 +716,11 @@
           cx: center.x,
           cy: center.y
         });
+        if (elem.id) node.setAttribute('data-id', elem.id);
         parent.appendChild(node);
       } else {
         const wrapper = svgEl('g');
+        if (elem.id) wrapper.setAttribute('data-id', elem.id);
         wrapper.appendChild(node);
         state.animation.moverNodes.push({
           wrapper,
@@ -477,6 +733,7 @@
         parent.appendChild(wrapper);
       }
     } else {
+      if (elem.id) node.setAttribute('data-id', elem.id);
       parent.appendChild(node);
     }
   }
@@ -1199,10 +1456,17 @@
     return applyPortalTeleport(elem, rawState, flatElements, dt);
   }
 
+  function updateAnimationCache() {
+    const flat = flattenElements(state.project.elements || []);
+    state.animation.flatElements = flat;
+    state.animation.elementsById = new Map(flat.map((e) => [String(e.id || ''), e]));
+  }
+
   function startSceneAnimation() {
     if (state.animation.rafId) return;
-    const flat = flattenElements(state.project.elements || []);
-    const byId = new Map(flat.map((e) => [String(e.id || ''), e]));
+    updateAnimationCache();
+    const flat = state.animation.flatElements;
+    const byId = state.animation.elementsById;
 
     // Pre-calcular e inicializar posición en primer frame
     state.animation.moverNodes.forEach((m) => {
@@ -1224,13 +1488,16 @@
       const dt = Math.max(0.001, Math.min(0.05, (ts - last) / 1000));
       state.animation.lastTs = ts;
 
+      const currentFlat = state.animation.flatElements || [];
+      const currentById = state.animation.elementsById || new Map();
+
       state.animation.lineNodes.forEach((ln) => {
         ln.offset -= dt * 64 * ln.speed;
         ln.node.setAttribute('stroke-dashoffset', String(ln.offset));
       });
 
       state.animation.moverNodes.forEach((m) => {
-        const statePos = resolveElementRouteState(m.elem, dt, flat, byId);
+        const statePos = resolveElementRouteState(m.elem, dt, currentFlat, currentById);
         if (statePos.routeFound) {
           const angleDeg = (statePos.angle * 180) / Math.PI;
           if (m.isMover) {
@@ -2353,7 +2620,7 @@
     const applyLivePayload = (project) => {
       if (!project) return;
       try {
-        applyProject(project, 'builder-live');
+        applyLiveDelta(project);
       } catch (error) {
         console.warn('⚠️ Error al aplicar builder-live:', error);
       }
